@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Argus — Findings Dashboard{% endblock %}
+{% block content %}
+
+<header class="topbar">
+    <div class="brand">
+        <svg class="brand-eye" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <ellipse cx="16" cy="16" rx="14" ry="8" stroke="var(--accent-amber)" stroke-width="1.6"/>
+            <circle cx="16" cy="16" r="4.5" fill="var(--accent-amber)"/>
+        </svg>
+        <span class="brand-name">ARGUS</span>
+        <span class="brand-sub">findings dashboard</span>
+    </div>
+
+    <form class="scan-select" method="get" action="{{ url_for('index') }}">
+        <label for="scan">scan</label>
+        <select name="scan" id="scan" onchange="this.form.submit()">
+            <option value="all" {% if not selected_scan %}selected{% endif %}>all scans</option>
+            {% for s in scans %}
+            <option value="{{ s.scan_id[:8] }}" {% if selected_scan == s.scan_id[:8] %}selected{% endif %}>
+                {{ s.scan_id[:8] }} — {{ s.target }}
+            </option>
+            {% endfor %}
+        </select>
+        <label for="status">status</label>
+        <select name="status" id="status" onchange="this.form.submit()">
+            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>all</option>
+            <option value="open" {% if status_filter == 'open' %}selected{% endif %}>open</option>
+            <option value="fixed" {% if status_filter == 'fixed' %}selected{% endif %}>fixed</option>
+            <option value="false_positive" {% if status_filter == 'false_positive' %}selected{% endif %}>false positive</option>
+        </select>
+    </form>
+
+    <div class="status-pills">
+        <span class="pill pill-open">{{ open_count }} open</span>
+        <span class="pill pill-fixed">{{ fixed_count }} fixed</span>
+        <span class="pill pill-fp">{{ fp_count }} false positive</span>
+    </div>
+</header>
+
+<main class="layout">
+    <section class="gauge-panel">
+        <h2 class="panel-label">severity</h2>
+
+        <div class="gauge-wrap">
+            <svg class="gauge" viewBox="0 0 160 160">
+                {% for ring in gauge_rings %}
+                {% if ring.count > 0 %}
+                <circle
+                    cx="80" cy="80" r="{{ ring.radius }}"
+                    fill="none"
+                    stroke="{{ ring.color }}"
+                    stroke-width="7"
+                    stroke-linecap="round"
+                    stroke-dasharray="{{ ring.dash }} {{ ring.circumference }}"
+                    transform="rotate(-90 80 80)"
+                    opacity="0.9"
+                />
+                {% else %}
+                <circle
+                    cx="80" cy="80" r="{{ ring.radius }}"
+                    fill="none"
+                    stroke="var(--panel-border)"
+                    stroke-width="1"
+                />
+                {% endif %}
+                {% endfor %}
+                <circle cx="80" cy="80" r="14" fill="{{ pupil_color }}" opacity="0.85"/>
+                <circle cx="80" cy="80" r="14" fill="none" stroke="var(--bg)" stroke-width="2"/>
+            </svg>
+        </div>
+        <p class="gauge-total-caption">{{ total }} finding{{ '' if total == 1 else 's' }}</p>
+
+        <ul class="legend">
+            {% for vt in vuln_type_order %}
+            <li class="legend-row">
+                <span class="legend-swatch" style="background:{{ vuln_type_color[vt] }}"></span>
+                <span class="legend-type">{{ vt }}</span>
+                <span class="legend-count">{{ counts_by_type[vt] }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="findings-panel">
+        <h2 class="panel-label">findings <span class="panel-sublabel">sorted by severity</span></h2>
+
+        {% if not findings %}
+        <div class="empty-state">
+            <p>No findings match the current filters.</p>
+            <p class="empty-sub">Run a scan from the CLI, or widen the status filter above.</p>
+        </div>
+        {% else %}
+        <table class="findings-table">
+            <thead>
+                <tr>
+                    <th class="col-severity">sev</th>
+                    <th class="col-type">type</th>
+                    <th class="col-confidence">confidence</th>
+                    <th class="col-module">module</th>
+                    <th class="col-url">url</th>
+                    <th class="col-status">status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in findings %}
+                <tr class="row-status-{{ f.status }}">
+                    <td class="col-severity">
+                        <span class="sev-badge" style="border-color:{{ vuln_type_color.get(f.vuln_type, '#6B93B0') }}; color:{{ vuln_type_color.get(f.vuln_type, '#6B93B0') }}">
+                            {{ "%.1f"|format(f.severity_score) }}
+                        </span>
+                    </td>
+                    <td class="col-type">{{ f.vuln_type }}</td>
+                    <td class="col-confidence">
+                        <span class="conf-tag conf-{{ f.confidence }}">{{ f.confidence }}</span>
+                    </td>
+                    <td class="col-module">{{ f.module }}</td>
+                    <td class="col-url" title="{{ f.description }}">{{ f.url }}</td>
+                    <td class="col-status">
+                        <form method="post" action="{{ url_for('update_status', finding_id=f.finding_id) }}" class="status-form">
+                            <select name="status" onchange="this.form.submit()">
+                                <option value="open" {% if f.status == 'open' %}selected{% endif %}>open</option>
+                                <option value="fixed" {% if f.status == 'fixed' %}selected{% endif %}>fixed</option>
+                                <option value="false_positive" {% if f.status == 'false_positive' %}selected{% endif %}>false positive</option>
+                            </select>
+                        </form>
+                    </td>
+                </tr>
+                {% if f.fix_suggestion %}
+                <tr class="row-fix-suggestion">
+                    <td></td>
+                    <td colspan="5" class="fix-suggestion">
+                        <span class="fix-label">suggested fix</span> {{ f.fix_suggestion }}
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </section>
+</main>
+
+{% endblock %}

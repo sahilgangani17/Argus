@@ -1,0 +1,132 @@
+# Argus — Setup & Run
+
+## 1. Install dependencies
+```bash
+python3 -m venv venv
+source venv/bin/activate      # Windows: venv\Scripts\activate
+pip install httpx aiohttp click flask jinja2 pyyaml dnspython
+```
+
+## 2. Start a target to scan
+This repo ships a local test target (`test_target.py`) that mimics DVWA's
+false-positive trap (a custom 404 page that returns HTTP 200) plus a few
+real hidden resources, so you can validate the tool without Docker/DVWA:
+```bash
+python test_target.py
+# serves on http://127.0.0.1:8080
+```
+If you have Docker, use real DVWA instead:
+```bash
+docker run -d -p 8080:80 vulnerables/web-dvwa
+```
+
+## 3. Edit scope.yaml
+`scope/scope.yaml` already authorizes `127.0.0.1`, `localhost`, and
+`dvwa.local`. Add any other target you're explicitly authorized to test.
+
+## 4. Auto-discover API endpoints (optional but recommended)
+If your target is a FastAPI / Swagger / OpenAPI app, Argus can automatically
+extract all its routes from the `/openapi.json` spec and generate a ready-to-use
+wordlist — no manual wordlist editing needed.
+
+```bash
+# Discover all routes and save to a wordlist file
+python cli/argus_cli.py discover http://127.0.0.1:8000 --output wordlists/mytarget.txt
+
+# Example output:
+# [+] Discovered 45 routes! Saved to 'wordlists/mytarget.txt'.
+#    - api/v1/auth/login
+#    - api/v1/users
+#    - api/v1/query
+#    - health
+#    ...
+```
+
+Or use `--auto-discover` directly inside the `scan` command to discover + scan
+in a single step:
+```bash
+python cli/argus_cli.py scan http://127.0.0.1:8000 \
+    --scope scope/scope.yaml --modules dir --auto-discover
+```
+Argus will hit `/openapi.json` (and several fallback spec paths), extract every
+defined route, write them to `wordlists/talk2tables.txt`, then immediately run
+the directory-enumeration scan against all discovered paths.
+
+## 5. Run scans via the CLI
+
+> **Windows PowerShell note:** omit the `PYTHONPATH=.` prefix — it is not needed on Windows.
+
+```bash
+# Passive only (directory/file enumeration using default wordlist)
+python cli/argus_cli.py scan http://127.0.0.1:8080 \
+    --scope scope/scope.yaml --modules dir
+
+# Use a custom or auto-generated wordlist
+python cli/argus_cli.py scan http://127.0.0.1:8000 \
+    --scope scope/scope.yaml --modules dir \
+    --wordlist wordlists/mytarget.txt
+
+# Full active run: dir + vhost + param fuzzing
+python cli/argus_cli.py scan http://127.0.0.1:8080 \
+    --scope scope/scope.yaml --modules dir,vhost,param \
+    --i-own-this --param q --root-host dvwa.local \
+    --param-url "http://127.0.0.1:8080/search?q=x"
+
+# List findings / scans
+python cli/argus_cli.py findings
+python cli/argus_cli.py scans
+```
+
+### scan command flags
+| Flag | Default | Description |
+|---|---|---|
+| `--scope` | `scope/scope.yaml` | Path to authorization scope file |
+| `--modules` | `dir` | Comma-separated: `dir`, `vhost`, `param` |
+| `--wordlist` | `wordlists/common.txt` | Wordlist path for directory enumeration |
+| `--auto-discover` | off | Auto-extract routes from OpenAPI spec before scanning |
+| `--i-own-this` | off | Required to unlock active modules (vhost, param) |
+| `--rate` | `15.0` | Requests per second (rate limit) |
+| `--param` | — | Parameter name to fuzz (required for `param` module) |
+| `--param-url` | — | Full URL with query param to fuzz |
+| `--root-host` | — | Domain for vhost candidate generation |
+
+## 6. Generate AI fix suggestions (optional)
+```bash
+# Configure a provider (optional — without a key it uses built-in offline
+# fallback guidance instead, so the feature never breaks mid-demo)
+export ANTHROPIC_API_KEY=sk-ant-...        # or OPENAI_API_KEY, with ARGUS_LLM_PROVIDER=openai
+
+python cli/argus_cli.py triage --scan <scan_id_prefix>
+# omit --scan to triage all confirmed findings across every scan
+```
+
+## 7. View the dashboard
+```bash
+python dashboard/app.py
+# open http://127.0.0.1:5050
+```
+It reads live from the same `argus.db` SQLite file the CLI writes to —
+run a scan, refresh the dashboard, findings appear with no manual import.
+
+## Project layout
+```
+core/db.py              SQLite schema + severity scoring (FR-9)
+core/auth_gate.py       Authorization gate: scope.yaml, --i-own-this, rate limiter (FR-0)
+core/dir_enum.py        Directory/file enumeration + false-positive filtering (FR-1)
+core/vhost.py           VHost discovery (FR-2, active module)
+core/param_fuzz.py      XSS/SQLi parameter fuzzing (FR-4, active module)
+core/ai_triage.py       LLM fix-suggestion generation + offline fallback (FR-8.1)
+core/api_discovery.py   OpenAPI/Swagger route extractor — auto-generates wordlists
+cli/argus_cli.py        CLI entry point: scan, discover, triage, findings, scans (FR-7.1)
+dashboard/              Flask web dashboard (FR-10)
+scope/scope.yaml        Authorized-targets allowlist
+wordlists/              Wordlists for directory enumeration
+  common.txt            Generic web paths (admin, .env, .git, backup, etc.)
+  talk2tables.txt       Auto-generated by 'discover' command (OpenAPI routes)
+test_target.py          Local Flask app for testing without Docker/DVWA
+```
+
+## Not yet built
+Subdomain enumeration (FR-5), reporting engine (FR-11), VS Code extension,
+browser extension. See `argus-prd.md` / `argus-solution.md` for the full
+spec and build-tier priorities.

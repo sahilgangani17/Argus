@@ -1,0 +1,8 @@
+  admin
+config.php
+backup.zip
+.env
+.git/config
+uploads
+search
+totally-fake-path-here
