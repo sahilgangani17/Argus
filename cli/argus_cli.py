@@ -12,6 +12,10 @@ Examples:
   python cli/argus_cli.py scan http://127.0.0.1:8080 --scope scope/scope.yaml \\
       --modules dir,vhost,param --i-own-this --param q --root-host dvwa.local
 
+  # Schema-aware API fuzzing (auto-discovers endpoints, then fuzzes them)
+  python cli/argus_cli.py scan http://127.0.0.1:8000 --scope scope/scope.yaml \\
+      --modules api --i-own-this
+
   # List findings from the most recent scan
   python cli/argus_cli.py findings
 """
@@ -28,8 +32,8 @@ from core import db
 from core.auth_gate import ScanContext, ScopeViolation, ActiveModuleBlocked, ScopeError
 from core.dir_enum import enumerate_directories, load_wordlist as load_dir_wordlist
 from core.vhost import discover_vhosts
-from core.param_fuzz import fuzz_parameter
-from core.api_discovery import discover_api_routes
+from core.param_fuzz import fuzz_parameter, fuzz_api_endpoints
+from core.api_discovery import discover_api_routes, discover_api_endpoints
 
 
 @click.group()
@@ -43,9 +47,9 @@ def cli():
 @click.option("--scope", "scope_file", default="scope/scope.yaml", show_default=True,
               help="Path to the signed scope.yaml authorization file.")
 @click.option("--modules", default="dir", show_default=True,
-              help="Comma-separated modules to run: dir,vhost,param")
+              help="Comma-separated modules to run: dir,vhost,param,api")
 @click.option("--i-own-this", "confirmed_active", is_flag=True, default=False,
-              help="Required to unlock active modules (vhost, param fuzzing).")
+              help="Required to unlock active modules (vhost, param, api fuzzing).")
 @click.option("--rate", default=15.0, show_default=True, help="Requests per second (rate limit).")
 @click.option("--wordlist", default="wordlists/common.txt", show_default=True,
               help="Wordlist for directory enumeration.")
@@ -59,11 +63,19 @@ def cli():
               help="Full URL (with existing query params) to fuzz. Defaults to TARGET if not given. "
                    "Use this when TARGET is a clean base URL for dir/vhost but the param lives "
                    "on a different path, e.g. --param-url 'http://host/search?q=x'.")
-def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_discover, root_host, param_name, param_url):
+@click.option("--spec-file", default=None,
+              help="Path to a local openapi.json/yaml file to ingest schemas when live specs are blocked.")
+def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_discover, root_host, param_name, param_url, spec_file):
     """Run a scan against TARGET using the specified modules.
 
     TARGET should be a clean base URL (no query string) for dir/vhost modules.
     Use --param-url if the parameter to fuzz lives on a different path/query.
+
+    Modules:
+      dir   — Directory & file enumeration with false-positive filtering
+      vhost — Virtual host discovery via Host header fuzzing (active)
+      param — Single query parameter fuzzing with SQLi/XSS payloads (active)
+      api   — Schema-aware API endpoint discovery + targeted fuzzing (active)
     """
     module_list = [m.strip() for m in modules.split(",") if m.strip()]
     param_target = param_url or target
@@ -134,6 +146,36 @@ def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_dis
                     total += len(results)
                 except ActiveModuleBlocked as e:
                     click.secho(f"  [SKIPPED] {e}", fg="yellow")
+
+        if "api" in module_list:
+            click.echo("\n[api_discovery] Discovering API endpoints...")
+            try:
+                endpoints = await discover_api_endpoints(target, ctx, scan_id, spec_file=spec_file)
+                if endpoints:
+                    click.secho(f"  -> Discovered {len(endpoints)} endpoint(s):", fg="green")
+                    for ep in endpoints[:20]:  # show first 20
+                        params_info = ""
+                        if ep.query_params:
+                            params_info += f" query=[{','.join(ep.query_params)}]"
+                        if ep.path_params:
+                            params_info += f" path=[{','.join(ep.path_params)}]"
+                        if ep.json_body_schema:
+                            fields = list(ep.json_body_schema.get("properties", {}).keys())
+                            params_info += f" body=[{','.join(fields[:5])}]"
+                        click.echo(f"     {ep.method:6s} {ep.path}{params_info}  ({ep.source})")
+                    if len(endpoints) > 20:
+                        click.echo(f"     ... and {len(endpoints) - 20} more")
+
+                    click.echo("\n[api_fuzz] Running schema-aware vulnerability fuzzing...")
+                    results = await fuzz_api_endpoints(target, endpoints, ctx, scan_id)
+                    click.secho(f"  -> {len(results)} finding(s)", fg="green" if results else "white")
+                    for r in results:
+                        click.echo(f"     [{r.confidence}] {r.vuln_type} in '{r.parameter}': {r.evidence[:80]}")
+                    total += len(results)
+                else:
+                    click.secho("  -> No API endpoints discovered.", fg="yellow")
+            except ActiveModuleBlocked as e:
+                click.secho(f"  [SKIPPED] {e}", fg="yellow")
 
         return total
 
