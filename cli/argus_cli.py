@@ -16,6 +16,14 @@ Examples:
   python cli/argus_cli.py scan http://127.0.0.1:8000 --scope scope/scope.yaml \\
       --modules api --i-own-this
 
+  # Subdomain enumeration (passive crt.sh + active DNS brute-force)
+  python cli/argus_cli.py scan example.com --scope scope/scope.yaml \\
+      --modules subdomain --i-own-this
+
+  # Passive-only subdomain (no --i-own-this required)
+  python cli/argus_cli.py scan example.com --scope scope/scope.yaml \\
+      --modules subdomain
+
   # List findings from the most recent scan
   python cli/argus_cli.py findings
 """
@@ -34,6 +42,7 @@ from core.dir_enum import enumerate_directories, load_wordlist as load_dir_wordl
 from core.vhost import discover_vhosts
 from core.param_fuzz import fuzz_parameter, fuzz_api_endpoints
 from core.api_discovery import discover_api_routes, discover_api_endpoints
+from core.subdomain import enumerate_subdomains, DEFAULT_SUBDOMAIN_WORDLIST
 
 
 @click.group()
@@ -47,7 +56,7 @@ def cli():
 @click.option("--scope", "scope_file", default="scope/scope.yaml", show_default=True,
               help="Path to the signed scope.yaml authorization file.")
 @click.option("--modules", default="dir", show_default=True,
-              help="Comma-separated modules to run: dir,vhost,param,api")
+              help="Comma-separated modules to run: dir,vhost,param,api,subdomain")
 @click.option("--i-own-this", "confirmed_active", is_flag=True, default=False,
               help="Required to unlock active modules (vhost, param, api fuzzing).")
 @click.option("--rate", default=15.0, show_default=True, help="Requests per second (rate limit).")
@@ -72,10 +81,11 @@ def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_dis
     Use --param-url if the parameter to fuzz lives on a different path/query.
 
     Modules:
-      dir   — Directory & file enumeration with false-positive filtering
-      vhost — Virtual host discovery via Host header fuzzing (active)
-      param — Single query parameter fuzzing with SQLi/XSS payloads (active)
-      api   — Schema-aware API endpoint discovery + targeted fuzzing (active)
+      dir       — Directory & file enumeration with false-positive filtering
+      vhost     — Virtual host discovery via Host header fuzzing (active)
+      param     — Single query parameter fuzzing with SQLi/XSS payloads (active)
+      api       — Schema-aware API endpoint discovery + targeted fuzzing (active)
+      subdomain — Subdomain enumeration: passive crt.sh + active DNS brute-force + AXFR
     """
     module_list = [m.strip() for m in modules.split(",") if m.strip()]
     param_target = param_url or target
@@ -174,6 +184,51 @@ def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_dis
                     total += len(results)
                 else:
                     click.secho("  -> No API endpoints discovered.", fg="yellow")
+            except ActiveModuleBlocked as e:
+                click.secho(f"  [SKIPPED] {e}", fg="yellow")
+
+        if "subdomain" in module_list:
+            click.echo("\n[subdomain] Running subdomain enumeration...")
+            passive_only = not confirmed_active
+            if passive_only:
+                click.secho("  (passive-only mode — add --i-own-this to enable DNS brute-force & AXFR)",
+                            fg="yellow")
+            try:
+                sub_results = await enumerate_subdomains(
+                    target, ctx, scan_id,
+                    wordlist=None,  # use built-in DEFAULT_SUBDOMAIN_WORDLIST
+                    passive_only=passive_only,
+                )
+                live = [r for r in sub_results if r.is_live]
+                click.secho(
+                    f"  -> {len(sub_results)} subdomain(s) discovered  "
+                    f"({len(live)} HTTP-live)",
+                    fg="green" if sub_results else "white",
+                )
+                for r in sub_results:
+                    live_tag = f"  LIVE -> {r.live_url}" if r.is_live else ""
+                    ip_tag = f"  [{r.ip}]" if r.ip else "  [unresolved]"
+                    click.echo(f"     [{r.source:10s}] {r.subdomain}{ip_tag}{live_tag}")
+                total += len(sub_results)
+
+                # Feedback loop: re-feed live subdomains into dir module
+                if live and "dir" in module_list:
+                    click.secho(
+                        f"  -> Feeding {len(live)} live subdomain(s) into directory enumeration...",
+                        fg="cyan",
+                    )
+                    wl = load_dir_wordlist(wordlist)
+                    for sub_finding in live:
+                        if sub_finding.live_url:
+                            click.echo(f"     [dir_enum -> {sub_finding.subdomain}]")
+                            sub_dir_results = await enumerate_directories(
+                                sub_finding.live_url, wl, ctx, scan_id
+                            )
+                            click.secho(
+                                f"       -> {len(sub_dir_results)} finding(s)",
+                                fg="green" if sub_dir_results else "white",
+                            )
+                            total += len(sub_dir_results)
             except ActiveModuleBlocked as e:
                 click.secho(f"  [SKIPPED] {e}", fg="yellow")
 

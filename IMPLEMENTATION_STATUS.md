@@ -9,12 +9,12 @@
 
 | Category | Total Requirements | Implemented | Pending | Completion Rate |
 |---|---|---|---|---|
-| **Core Fuzzing Engines** | 6 | 4 | 2 | **67%** |
+| **Core Fuzzing Engines** | 6 | 5 | 1 | **83%** |
 | **Authorization & Control** | 4 | 4 | 0 | **100%** |
 | **Delivery Surfaces & UI** | 4 | 2 | 2 | **50%** |
 | **AI & Scoring Engine** | 3 | 2 | 1 | **67%** |
 | **Reporting & Export** | 1 | 0 | 1 | **0%** |
-| **Overall Project** | **18** | **12** | **6** | **67%** |
+| **Overall Project** | **18** | **13** | **5** | **72%** |
 
 ---
 
@@ -26,7 +26,7 @@
 - **[FR-0.2] Target Host Rejection**: ✅ **Implemented** ([core/auth_gate.py](file:///d:/Project/SIH/Argus/core/auth_gate.py))
   - Hostnames not matching scope rules are immediately blocked at the request layer with `ScopeViolation`.
 - **[FR-0.3] Active Scanning Confirmation Flag**: ✅ **Implemented** ([core/auth_gate.py](file:///d:/Project/SIH/Argus/core/auth_gate.py))
-  - Requires `--i-own-this` CLI flag to unlock active fuzzing modules (vhost, param, api).
+  - Requires `--i-own-this` CLI flag to unlock active fuzzing modules (vhost, param, api, subdomain).
 - **[FR-0.4] Default Token-Bucket Rate Limiter**: ✅ **Implemented** ([core/auth_gate.py](file:///d:/Project/SIH/Argus/core/auth_gate.py))
   - Configurable async rate limiting (`requests_per_second`, default 15 req/sec).
 
@@ -64,12 +64,12 @@
 ---
 
 ### FR-5: Subdomain Enumeration
-- **[FR-5.1] Active DNS Brute-Force & Zone Transfer**: ❌ **Pending** (`core/subdomain.py`)
-  - Wordlist-based DNS resolution and `AXFR` zone-transfer attempts.
-- **[FR-5.2] Passive Certificate Transparency Lookups**: ❌ **Pending** (`core/subdomain.py`)
-  - Querying `crt.sh` API for historical certificates.
-- **[FR-5.3] Liveness Verification & Recursive Feedback**: ❌ **Pending** (`core/subdomain.py`)
-  - Resolving IP addresses, checking HTTP/HTTPS liveness, and feeding live subdomains back into directory & vhost enumeration.
+- **[FR-5.1] Active DNS Brute-Force & Zone Transfer**: ✅ **Implemented** ([core/subdomain.py](file:///d:/Project/SIH/Argus/core/subdomain.py))
+  - Wordlist-based DNS resolution across 105 built-in dictionary words and `AXFR` zone-transfer attempts.
+- **[FR-5.2] Passive Certificate Transparency Lookups**: ✅ **Implemented** ([core/subdomain.py](file:///d:/Project/SIH/Argus/core/subdomain.py))
+  - Queries Certificate Transparency logs via `crt.sh` JSON API.
+- **[FR-5.3] Liveness Verification & Recursive Feedback**: ✅ **Implemented** ([core/subdomain.py](file:///d:/Project/SIH/Argus/core/subdomain.py))
+  - Resolves IP addresses, probes HTTP/HTTPS liveness, and automatically feeds live subdomains back into directory enumeration.
 
 ---
 
@@ -93,7 +93,7 @@
 
 ### FR-8 & FR-9 & FR-10: AI Triage, Scoring & Database
 - **[FR-8.1] LLM Fix Suggestions**: ✅ **Implemented** ([core/ai_triage.py](file:///d:/Project/SIH/Argus/core/ai_triage.py))
-  - Generates code-level remediation suggestions using Gemini/OpenAI API calls (with offline rule-based fallback).
+  - Generates code-level remediation suggestions using Google Gemini API (`gemini-2.5-flash`) or OpenAI API (with offline rule-based fallback).
 - **[FR-8.2] ML Prioritization Classifier**: ❌ **Pending** (Stretch Item)
   - Scikit-learn classifier for ordering suspected findings.
 - **[FR-9 & FR-10] Vulnerability Scoring & SQLite Storage**: ✅ **Implemented** ([core/db.py](file:///d:/Project/SIH/Argus/core/db.py))
@@ -110,17 +110,17 @@
 ## 3. What Needs to Be Built Next (Roadmap)
 
 ```
-[Phase 1 - Complete]    [Phase 2 - Current Next Step]    [Phase 3 - Multi-Surface Expansion]
-   Auth Gate               Subdomain Enumeration            VS Code Extension
-   Directory Enum          Custom YAML Templates            Browser Extension
-   VHost Discovery         HTML/PDF Report Exporter         ML Prioritizer
-   API Fuzzing
-   AI Fix Triage
-   Web Dashboard
+[Phase 1 - Complete]             [Phase 2 - Current Next Step]    [Phase 3 - Multi-Surface Expansion]
+   Auth Gate (FR-0)                 Custom YAML Templates (FR-6)     VS Code Extension (FR-7.2)
+   Directory Enum (FR-1)            HTML/PDF Report Exporter         Browser Extension (FR-7.3)
+   VHost Discovery (FR-2)                                            ML Prioritizer (FR-8.2)
+   API Fuzzing (FR-3 & FR-4)
+   Subdomain Enumeration (FR-5)
+   Gemini AI Fix Triage (FR-8.1)
+   Web Dashboard (FR-7.4)
 ```
 
 ### Next Implementation Priorities:
-1. **Module FR-5**: Implement `core/subdomain.py` (crt.sh passive lookup + DNS brute-force + recursive liveness check).
-2. **Module FR-6**: Implement `core/custom_rules.py` (YAML test template executor).
-3. **Module FR-11**: Implement `core/report_gen.py` (HTML & PDF scan report generation).
-4. **Surfaces**: Implement VS Code and Chrome Browser extensions.
+1. **Module FR-6**: Implement `core/custom_rules.py` (YAML test template executor).
+2. **Module FR-11**: Implement `core/report_gen.py` (HTML & PDF scan report generation).
+3. **Surfaces**: Implement VS Code and Chrome Browser extensions.
