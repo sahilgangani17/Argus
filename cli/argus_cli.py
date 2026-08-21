@@ -223,7 +223,7 @@ def discover(target, scope_file, output_wordlist):
               help="Scan ID prefix to triage. Omit to triage all confirmed findings across all scans.")
 def triage(scan_id_prefix):
     """Generate LLM fix suggestions for confirmed findings (FR-8.1)."""
-    from core.ai_triage import triage_scan, LLM_PROVIDER, ANTHROPIC_API_KEY, OPENAI_API_KEY
+    from core.ai_triage import triage_scan, LLM_PROVIDER, GEMINI_API_KEY, OPENAI_API_KEY
 
     db.init_db()
     scan_id = None
@@ -234,7 +234,7 @@ def triage(scan_id_prefix):
             sys.exit(1)
         scan_id = matches[0]
 
-    key_configured = bool(ANTHROPIC_API_KEY or OPENAI_API_KEY)
+    key_configured = bool(GEMINI_API_KEY or OPENAI_API_KEY)
     click.echo(f"LLM provider: {LLM_PROVIDER} (key configured: {key_configured})")
     if not key_configured:
         click.secho("No API key set -- suggestions will use offline fallback guidance.", fg="yellow")

@@ -37,8 +37,8 @@ from core import db
 
 # --- Provider config -----------------------------------------------------
 
-LLM_PROVIDER = os.environ.get("ARGUS_LLM_PROVIDER", "anthropic")  # anthropic | openai | offline
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+LLM_PROVIDER = os.environ.get("ARGUS_LLM_PROVIDER", "gemini")  # gemini | openai | offline
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 LLM_TIMEOUT_SECONDS = 10.0  # PRD success metric: <10s finding-to-fix-suggestion round trip
 
@@ -122,27 +122,33 @@ def _call_llm(prompt: str) -> str:
     Isolated call site -- swap provider here without touching callers.
     Raises on failure; callers are responsible for falling back.
     """
-    if LLM_PROVIDER == "anthropic":
-        if not ANTHROPIC_API_KEY:
-            raise RuntimeError("ANTHROPIC_API_KEY not set")
+    if LLM_PROVIDER == "gemini":
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY or GOOGLE_API_KEY not set")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
         resp = httpx.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            url,
+            headers={"content-type": "application/json"},
             json={
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 300,
-                "messages": [{"role": "user", "content": prompt}],
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt}
+                        ]
+                    }
+                ]
             },
             timeout=LLM_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
         data = resp.json()
-        text_blocks = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
-        return "\n".join(text_blocks).strip()
+        candidates = data.get("candidates", [])
+        if candidates and "content" in candidates[0]:
+            parts = candidates[0]["content"].get("parts", [])
+            text_parts = [p.get("text", "") for p in parts if "text" in p]
+            if text_parts:
+                return "\n".join(text_parts).strip()
+        raise RuntimeError("No text returned in Gemini API response")
 
     elif LLM_PROVIDER == "openai":
         if not OPENAI_API_KEY:
@@ -163,6 +169,7 @@ def _call_llm(prompt: str) -> str:
 
     else:
         raise RuntimeError(f"Unknown or offline provider: {LLM_PROVIDER}")
+
 
 
 def generate_fix_suggestion(finding: dict) -> tuple[str, str]:
@@ -210,6 +217,6 @@ if __name__ == "__main__":
 
     db.init_db()
     print(f"LLM provider: {LLM_PROVIDER} "
-          f"(key configured: {bool(ANTHROPIC_API_KEY or OPENAI_API_KEY)})")
+          f"(key configured: {bool(GEMINI_API_KEY or OPENAI_API_KEY)})")
     n = triage_scan(scan_id=scan_arg)
     print(f"Generated {n} fix suggestion(s).")
