@@ -1,0 +1,96 @@
+# Argus — Python Dependencies
+# Generated: 2026-08-23
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# For a reproducible environment (exact versions), use:
+#   pip install -r requirements.txt --require-hashes  (add hashes via pip-compile)
+#
+# ─── Direct dependencies ──────────────────────────────────────────────────────
+
+# HTTP client — async, used by all scan modules
+httpx==0.28.1
+
+# CLI framework — argus_cli.py
+click==8.4.2
+
+# Web dashboard — dashboard/app.py
+Flask==3.1.3
+
+# YAML parsing — auth_gate.py (scope files), custom_rules.py (templates)
+PyYAML==6.0.3
+
+# DNS resolution — core/subdomain.py (zone transfer / AXFR)
+dnspython==2.8.0
+
+# HTML/PDF report generation — core/report_gen.py
+# xhtml2pdf: pure Python PDF renderer, works on Windows without GTK/pango
+xhtml2pdf==0.2.17
+
+# Jinja2 templating — core/report_gen.py (also bundled with Flask)
+Jinja2==3.1.6
+
+# ─── Transitive dependencies (pinned for reproducibility) ────────────────────
+
+# httpx deps
+anyio==4.14.2
+certifi==2026.7.22
+h11==0.16.0
+httpcore==1.0.9
+idna==3.18
+
+# Flask deps
+blinker==1.9.0
+itsdangerous==2.2.0
+MarkupSafe==3.0.3
+Werkzeug==3.1.8
+
+# click / colorama (Windows colour support)
+colorama==0.4.6
+
+# WeasyPrint deps (still installed; used for fallback or future upgrade)
+brotli==1.2.0
+cffi==2.1.1
+cssselect2==0.9.0
+fonttools==4.63.0
+pillow==12.3.0
+pycparser==3.0
+pydyf==0.12.1
+pyphen==0.18.1
+tinycss2==1.5.1
+tinyhtml5==2.1.0
+weasyprint==69.0
+webencodings==0.6.1
+zopfli==0.4.3
+
+# xhtml2pdf deps
+arabic-reshaper==3.0.1
+asn1crypto==1.5.1
+charset-normalizer==3.5.1
+cryptography==50.0.0
+html5lib==1.1
+lxml==6.1.2
+oscrypto==1.3.0
+pyHanko==0.36.2
+pyhanko-certvalidator==0.31.4
+pypdf==6.16.2
+python-bidi==0.6.11
+reportlab==4.5.1
+requests==2.34.2
+six==1.17.0
+svglib==2.2.0
+tzdata==2026.3
+tzlocal==5.4.4
+uritools==6.1.3
+urllib3==2.7.0
+
+# aiohttp deps (pulled in by some async utilities)
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.3
+aiosignal==1.4.0
+attrs==26.1.0
+frozenlist==1.8.0
+multidict==6.7.1
+propcache==0.5.2
+yarl==1.24.5

@@ -33,6 +33,7 @@ import sys
 from pathlib import Path
 
 import click
+import httpx
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -43,6 +44,7 @@ from core.vhost import discover_vhosts
 from core.param_fuzz import fuzz_parameter, fuzz_api_endpoints
 from core.api_discovery import discover_api_routes, discover_api_endpoints
 from core.subdomain import enumerate_subdomains, DEFAULT_SUBDOMAIN_WORDLIST
+from core.custom_rules import load_templates, run_all_templates
 
 
 @click.group()
@@ -74,7 +76,10 @@ def cli():
                    "on a different path, e.g. --param-url 'http://host/search?q=x'.")
 @click.option("--spec-file", default=None,
               help="Path to a local openapi.json/yaml file to ingest schemas when live specs are blocked.")
-def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_discover, root_host, param_name, param_url, spec_file):
+@click.option("--templates", "templates_path", default=None,
+              help="Path to a YAML rule template file or directory of templates (FR-6). "
+                   "Automatically enables the 'rules' module.")
+def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_discover, root_host, param_name, param_url, spec_file, templates_path):
     """Run a scan against TARGET using the specified modules.
 
     TARGET should be a clean base URL (no query string) for dir/vhost modules.
@@ -86,8 +91,12 @@ def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_dis
       param     — Single query parameter fuzzing with SQLi/XSS payloads (active)
       api       — Schema-aware API endpoint discovery + targeted fuzzing (active)
       subdomain — Subdomain enumeration: passive crt.sh + active DNS brute-force + AXFR
+      rules     — Custom YAML rule templates (FR-6); use with --templates <path>
     """
     module_list = [m.strip() for m in modules.split(",") if m.strip()]
+    # --templates implicitly enables the rules module even if not listed
+    if templates_path and "rules" not in module_list:
+        module_list.append("rules")
     param_target = param_url or target
 
     db.init_db()
@@ -120,6 +129,63 @@ def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_dis
     async def run_all():
         total = 0
 
+        # ── helpers ──────────────────────────────────────────────────────────
+        async def _auto_discover_params(client_):
+            """
+            Crawl target HTML and extract fuzzable (url, param_name) pairs from:
+              - Phase 0: query params already present in TARGET itself
+              - Phase 1: <a href="?foo=bar"> query strings in the HTML response
+              - Phase 2: <form action="..."> + <input name="..."> elements
+            Returns a deduplicated list of (url_with_param, param_name) tuples.
+            """
+            import re
+            from urllib.parse import urljoin, urlparse, parse_qs
+
+            discovered = []
+            seen = set()
+
+            # Phase 0: TARGET URL itself may already contain query params
+            parsed_target = urlparse(target)
+            base_url = parsed_target.scheme + "://" + parsed_target.netloc + parsed_target.path
+            for pname in parse_qs(parsed_target.query).keys():
+                key = (base_url, pname)
+                if key not in seen:
+                    seen.add(key)
+                    discovered.append((base_url + "?" + pname + "=FUZZ", pname))
+
+            try:
+                await ctx.throttle()
+                resp = await client_.get(target, timeout=8.0, follow_redirects=True)
+                html = resp.text
+            except Exception:
+                return discovered
+
+            # Phase 1: <a href="...?param=value"> links
+            for href in re.findall(r'href=["\']([^"\']*\?[^"\']+)["\']', html, re.IGNORECASE):
+                full = urljoin(target, href)
+                parsed = urlparse(full)
+                for pname in parse_qs(parsed.query).keys():
+                    key = (full.split('?')[0], pname)
+                    if key not in seen:
+                        seen.add(key)
+                        discovered.append((full.split('?')[0] + '?' + pname + '=FUZZ', pname))
+
+            # Phase 2: <form> elements + named inputs
+            for form in re.findall(r'<form[^>]*>(.*?)</form>', html, re.IGNORECASE | re.DOTALL):
+                action_m = re.search(r'action=["\']([^"\']*)["\']', form, re.IGNORECASE)
+                action = urljoin(target, action_m.group(1)) if action_m else target
+                for inp in re.findall(
+                    r'<(?:input|textarea|select)[^>]*name=["\']([^"\']+)["\']',
+                    form, re.IGNORECASE
+                ):
+                    key = (action, inp)
+                    if key not in seen:
+                        seen.add(key)
+                        discovered.append((action, inp))
+
+            return discovered
+        # ─────────────────────────────────────────────────────────────────────
+
         if "dir" in module_list:
             click.echo("\n[dir_enum] Running directory & file enumeration...")
             wl = load_dir_wordlist(wordlist)
@@ -144,18 +210,51 @@ def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_dis
                 click.secho(f"  [SKIPPED] {e}", fg="yellow")
 
         if "param" in module_list:
-            if not param_name:
-                click.secho("\n[param_fuzz] SKIPPED: --param <name> is required for this module.", fg="yellow")
+            try:
+                ctx.assert_active_allowed()
+            except ActiveModuleBlocked as e:
+                click.secho(f"\n[param_fuzz] [SKIPPED] {e}", fg="yellow")
             else:
-                click.echo(f"\n[param_fuzz] Fuzzing parameter '{param_name}' on {param_target}...")
-                try:
-                    results = await fuzz_parameter(param_target, param_name, ctx, scan_id)
-                    click.secho(f"  -> {len(results)} finding(s)", fg="green" if results else "white")
-                    for r in results:
-                        click.echo(f"     [{r.confidence}] {r.vuln_type}: {r.evidence}")
-                    total += len(results)
-                except ActiveModuleBlocked as e:
-                    click.secho(f"  [SKIPPED] {e}", fg="yellow")
+                async with httpx.AsyncClient() as _client:
+                    if param_name and param_target:
+                        # Manual mode — user specified --param and optionally --param-url
+                        click.echo(f"\n[param_fuzz] Fuzzing '{param_name}' on {param_target}...")
+                        results = await fuzz_parameter(param_target, param_name, ctx, scan_id)
+                        click.secho(f"  -> {len(results)} finding(s)", fg="green" if results else "white")
+                        for r in results:
+                            click.echo(f"     [{r.confidence}] {r.vuln_type}: {r.evidence}")
+                        total += len(results)
+
+                    else:
+                        # Auto mode — crawl target HTML for forms + query-param links
+                        click.echo(f"\n[param_fuzz] Auto-discovering parameters on {target}...")
+                        pairs = await _auto_discover_params(_client)
+                        if not pairs:
+                            click.secho(
+                                "  -> No fuzzable parameters found in HTML. "
+                                "Use --param <name> to specify one manually, "
+                                "or --modules api for full schema-aware discovery.",
+                                fg="yellow",
+                            )
+                        else:
+                            click.secho(
+                                f"  -> Found {len(pairs)} param(s) to fuzz: "
+                                + ", ".join(f"{p} @ {u[:40]}" for u, p in pairs[:5])
+                                + (f" ... +{len(pairs)-5} more" if len(pairs) > 5 else ""),
+                                fg="cyan",
+                            )
+                            all_results = []
+                            for fuzz_url, fuzz_param in pairs:
+                                r_list = await fuzz_parameter(fuzz_url, fuzz_param, ctx, scan_id)
+                                all_results.extend(r_list)
+                            click.secho(
+                                f"  -> {len(all_results)} finding(s) across {len(pairs)} param(s)",
+                                fg="green" if all_results else "white",
+                            )
+                            for r in all_results:
+                                click.echo(f"     [{r.confidence}] {r.vuln_type} [{r.parameter}]: {r.evidence[:80]}")
+                            total += len(all_results)
+
 
         if "api" in module_list:
             click.echo("\n[api_discovery] Discovering API endpoints...")
@@ -231,6 +330,39 @@ def scan(target, scope_file, modules, confirmed_active, rate, wordlist, auto_dis
                             total += len(sub_dir_results)
             except ActiveModuleBlocked as e:
                 click.secho(f"  [SKIPPED] {e}", fg="yellow")
+
+        if "rules" in module_list:
+            click.echo("\n[custom_rules] Running custom YAML rule templates...")
+            if not templates_path:
+                click.secho(
+                    "  [SKIPPED] --templates <path> is required for the 'rules' module.",
+                    fg="yellow",
+                )
+            else:
+                try:
+                    templates = load_templates(templates_path)
+                    if not templates:
+                        click.secho("  [SKIPPED] No valid templates found at the given path.",
+                                    fg="yellow")
+                    else:
+                        click.echo(f"  Loaded {len(templates)} template(s): "
+                                   f"{', '.join(t.id for t in templates)}")
+                        rule_results = await run_all_templates(
+                            target, templates, ctx, scan_id
+                        )
+                        click.secho(
+                            f"  -> {len(rule_results)} template(s) matched",
+                            fg="green" if rule_results else "white",
+                        )
+                        for r in rule_results:
+                            click.echo(
+                                f"     [{r.status_code}] {r.template_name} @ {r.url}"
+                            )
+                        total += len(rule_results)
+                except FileNotFoundError as e:
+                    click.secho(f"  [ERROR] {e}", fg="red")
+                except ActiveModuleBlocked as e:
+                    click.secho(f"  [SKIPPED] {e}", fg="yellow")
 
         return total
 
@@ -329,6 +461,58 @@ def scans():
     db.init_db()
     for s in db.get_scans():
         click.echo(f"{s['scan_id'][:8]}  {s['target']:40s}  {s['status']:10s}  started {s['started_at']:.0f}")
+
+
+@cli.command()
+@click.option("--scan", "scan_id_prefix", default=None,
+              help="Scan ID prefix to report on. Omit to aggregate all scans.")
+@click.option("--format", "fmt", default="html", show_default=True,
+              type=click.Choice(["html", "pdf"], case_sensitive=False),
+              help="Output format: html or pdf.")
+@click.option("--output", "output_path", default=None,
+              help="Output file path. Defaults to 'argus_report.<fmt>' in the current directory.")
+def report(scan_id_prefix, fmt, output_path):
+    """Generate an HTML or PDF vulnerability report (FR-11).
+
+    Reads findings directly from the SQLite database — no dashboard required.
+
+    Examples:\n
+      # HTML report for a specific scan\n
+      python cli/argus_cli.py report --scan abc12345 --format html\n\n
+      # PDF report for all scans\n
+      python cli/argus_cli.py report --format pdf --output full_report.pdf
+    """
+    from core.report_gen import export_html, export_pdf
+
+    db.init_db()
+
+    # Resolve scan_id prefix to full UUID
+    scan_id = None
+    if scan_id_prefix:
+        matches = [s["scan_id"] for s in db.get_scans() if s["scan_id"].startswith(scan_id_prefix)]
+        if not matches:
+            click.secho(f"[ERROR] No scan found matching prefix '{scan_id_prefix}'.", fg="red")
+            sys.exit(1)
+        scan_id = matches[0]
+        click.echo(f"Scan: {scan_id}")
+    else:
+        click.echo("Scope: all scans (aggregated)")
+
+    out = output_path or f"argus_report.{fmt.lower()}"
+
+    if fmt.lower() == "html":
+        click.echo(f"Rendering HTML report -> {out}")
+        export_html(out, scan_id=scan_id)
+        click.secho(f"[+] Report saved: {out}", fg="green", bold=True)
+
+    else:  # pdf
+        click.echo(f"Rendering PDF report -> {out}  (this may take a few seconds...)")
+        try:
+            export_pdf(out, scan_id=scan_id)
+            click.secho(f"[+] Report saved: {out}", fg="green", bold=True)
+        except ImportError as e:
+            click.secho(f"[ERROR] {e}", fg="red")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

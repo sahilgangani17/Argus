@@ -1,208 +1,335 @@
-# Argus — Comprehensive Web Application Fuzzer & Security Engine
+# Argus — Comprehensive Web Application Security Scanner
 
-Argus is an integrated web application security testing engine that automates discovery and vulnerability testing across directories/files, virtual hosts, API endpoints, URL parameters, and subdomains — featuring AI-assisted remediation suggestions.
+> **SIH1750** — An integrated web application security testing engine that automates discovery and vulnerability testing across directories, virtual hosts, API endpoints, parameters, and subdomains — with AI-assisted remediation and PDF/HTML reporting.
 
 ---
 
-## 1. Quick Setup & Dependencies
+## Feature Overview
+
+| Module | FR | Status |
+|---|---|---|
+| Authorization Gate (scope enforcement, rate limiting) | FR-0 | ✅ Done |
+| Directory & File Enumeration + false-positive filtering | FR-1 | ✅ Done |
+| Virtual Host Discovery (Host header fuzzing) | FR-2 | ✅ Done |
+| API Endpoint Discovery (4-phase: spec, JS scrape, OPTIONS, wordlist) | FR-3 | ✅ Done |
+| Schema-Aware Parameter Fuzzing (SQLi, XSS, IDOR, mass assignment…) | FR-4 | ✅ Done |
+| Subdomain Enumeration (crt.sh CT, AXFR, DNS brute-force) | FR-5 | ✅ Done |
+| Custom YAML Rule Templates (Nuclei-style engine) | FR-6 | ✅ Done |
+| CLI Scan Engine | FR-7.1 | ✅ Done |
+| Web Dashboard | FR-7.4 | ✅ Done |
+| AI Fix Suggestions (Gemini / OpenAI / offline fallback) | FR-8.1 | ✅ Done |
+| CVSS-inspired Severity Scoring + SQLite storage | FR-9/10 | ✅ Done |
+| HTML & PDF Report Exporter | FR-11 | ✅ Done |
+| VS Code Extension | FR-7.2 | 🔜 Roadmap |
+| Chrome Browser Extension | FR-7.3 | 🔜 Roadmap |
+
+---
+
+## Quick Start
+
+### 1. Install dependencies
 
 ```bash
 python -m venv venv
-source venv/bin/activate      # Windows: venv\Scripts\activate
-pip install httpx aiohttp click flask jinja2 pyyaml dnspython
+# Windows
+venv\Scripts\activate
+# macOS / Linux
+source venv/bin/activate
+
+pip install -r requirements.txt
 ```
 
----
+### 2. Configure your scope file
 
-## 2. Start a Test Target
+Copy the example and edit it with your authorized target(s). **Never commit your real `scope.yaml`** — it is gitignored.
 
-Argus ships with a local test target (`test_target.py`) that mimics real-world false-positive traps (soft 404s returning HTTP 200) and hidden resources:
+```bash
+cp scope/scope.example.yaml scope/scope.yaml
+```
+
+```yaml
+# scope/scope.yaml
+authorized_targets:
+  - 127.0.0.1
+  - localhost
+owner: "Your Name"
+signed: true
+```
+
+### 3. Start a local test target
 
 ```bash
 python test_target.py
-# serves on http://127.0.0.1:8080
+# → http://127.0.0.1:8080
 ```
 
-Alternatively, run DVWA via Docker:
+Or use DVWA via Docker:
+
 ```bash
 docker run -d -p 8080:80 vulnerables/web-dvwa
 ```
 
 ---
 
-## 3. Configure Authorization Scope (`scope.yaml`)
+## CLI Reference
 
-`scope/scope.yaml` enforces authorized-use-only scanning at the request layer before a single packet is sent.
+All commands follow the pattern:
 
-```yaml
-authorized_targets:
-  - 127.0.0.1
-  - localhost
-  - dvwa.local
+```
+python cli/argus_cli.py <command> [options]
 ```
 
----
-
-## 4. Feature Modules & Usage Guide
-
-### 4.1 Subdomain Enumeration (FR-5)
-Discovers hidden subdomains (`admin.target.com`, `api.target.com`) via a 3-phase pipeline:
-- **Passive CT Lookup**: Queries Certificate Transparency logs (`crt.sh`) without sending packets to the target.
-- **AXFR Zone Transfer**: Attempts DNS zone transfer to catch server misconfigurations.
-- **DNS Brute-Force**: High-concurrency async resolution across a built-in 105-word dictionary.
-- **HTTP/HTTPS Liveness & Feedback Loop**: Probes live web services and automatically feeds live hosts into directory enumeration.
+### `scan` — run any combination of modules
 
 ```bash
-# Passive subdomain scan (No --i-own-this needed)
-python cli/argus_cli.py scan target.com --scope scope/scope.yaml --modules subdomain
+# Directory enumeration only (no active confirmation needed)
+python cli/argus_cli.py scan http://127.0.0.1:8080 \
+    --scope scope/scope.yaml --modules dir
 
-# Full active subdomain scan + DNS brute-force
-python cli/argus_cli.py scan target.com --scope scope/scope.yaml --modules subdomain --i-own-this
+# Full active scan: dir + vhost + API + subdomain
+python cli/argus_cli.py scan http://127.0.0.1:8080 \
+    --scope scope/scope.yaml \
+    --modules dir,vhost,api,subdomain \
+    --i-own-this
 
-# Subdomain + directory enumeration feedback loop
-python cli/argus_cli.py scan target.com --scope scope/scope.yaml --modules subdomain,dir --i-own-this
+# API fuzzing with a local OpenAPI spec (grey-box mode)
+python cli/argus_cli.py scan http://127.0.0.1:8080 \
+    --scope scope/scope.yaml --modules api --i-own-this \
+    --spec-file path/to/openapi.json
+
+# Custom YAML rule templates (FR-6)
+python cli/argus_cli.py scan http://127.0.0.1:8080 \
+    --scope scope/scope.yaml --i-own-this \
+    --templates templates/
+
+# Parameter fuzzing — auto mode (no --param needed)
+# Argus crawls the target HTML for <form> fields and ?param= links
+python cli/argus_cli.py scan "http://127.0.0.1:8080/search?q=test" \
+    --scope scope/scope.yaml --modules param --i-own-this
+
+# Parameter fuzzing — manual mode (specific param + URL)
+python cli/argus_cli.py scan http://127.0.0.1:8080 \
+    --scope scope/scope.yaml --modules param --i-own-this \
+    --param q --param-url "http://127.0.0.1:8080/search?q=x"
+
+# Passive subdomain scan (no --i-own-this required)
+python cli/argus_cli.py scan target.com \
+    --scope scope/scope.yaml --modules subdomain
+
+# Subdomain -> directory enumeration feedback loop
+python cli/argus_cli.py scan target.com \
+    --scope scope/scope.yaml --modules subdomain,dir --i-own-this
 ```
 
----
+#### `scan` flags
 
-### 4.2 API Endpoint Discovery & Schema-Aware Fuzzing (FR-3 & FR-4)
-4-Phase discovery and vulnerability testing engine for REST, GraphQL, and microservice APIs:
-
-```
-                              ┌─────────────────────────┐
-                              │    Target Base URL      │
-                              └────────────┬────────────┘
-                                           │
-                        ┌──────────────────┴──────────────────┐
-                        │                                     │
-             [Path A: Spec Available]               [Path B: Spec Blocked / Hidden]
-                        │                                     │
-         Probe Spec Endpoints (OpenAPI/Swagger)      Passive JS Bundle Extraction (Regex)
-                        │                                     │
-         Parse Schema (Paths, Verbs, Body)           HTML / Form / Router Link Scraping
-                        │                                     │
-                        │                            API Path Wordlist Brute-Force
-                        │                                     │
-                        │                            Parameter Mining (Param Miner)
-                        └──────────────────┬──────────────────┘
-                                           │
-                                           ▼
-                            ┌─────────────────────────────┐
-                            │ Normalized Endpoint Schema  │
-                            │  (Method, Path, Params,     │
-                            │   Header, JSON Body)        │
-                            └──────────────┬──────────────┘
-                                           │
-                                           ▼
-                            ┌─────────────────────────────┐
-                            │ Targeted Vuln Payload       │
-                            │ Injection (SQLi, XSS, IDOR, │
-                            │ Mass Assign, Type Confusion)│
-                            └─────────────────────────────┘
-```
-
-```bash
-# Auto-discover endpoints and save to wordlist
-python cli/argus_cli.py discover http://127.0.0.1:8080 --output wordlists/mytarget.txt
-
-# Full API Discovery & Schema-Aware Fuzzing
-python cli/argus_cli.py scan http://127.0.0.1:8080 --scope scope/scope.yaml --modules api --i-own-this
-
-# Grey-Box API Scanning using a local OpenAPI spec file
-python cli/argus_cli.py scan http://127.0.0.1:8080 --spec-file path/to/openapi.json --modules api --i-own-this
-```
-
----
-
-### 4.3 Directory & File Enumeration (FR-1) & VHost Fuzzing (FR-2)
-```bash
-# Directory/file enumeration with false-positive filtering
-python cli/argus_cli.py scan http://127.0.0.1:8080 --scope scope/scope.yaml --modules dir
-
-# Multi-module active scan (dir + vhost + api + subdomain)
-python cli/argus_cli.py scan http://127.0.0.1:8080 --scope scope/scope.yaml --modules dir,vhost,api,subdomain --i-own-this
-```
-
----
-
-## 5. CLI Command Reference
-
-```bash
-# Review findings sorted by severity
-python cli/argus_cli.py findings
-
-# View recorded scans
-python cli/argus_cli.py scans
-```
-
-### CLI `scan` Command Flags
 | Flag | Default | Description |
 |---|---|---|
-| `--scope` | `scope/scope.yaml` | Path to authorization scope file |
-| `--modules` | `dir` | Comma-separated: `dir`, `vhost`, `param`, `api`, `subdomain` |
-| `--wordlist` | `wordlists/common.txt` | Wordlist path for directory enumeration |
-| `--spec-file` | — | Path to a local `openapi.json` file for grey-box API scanning |
-| `--auto-discover` | off | Auto-extract routes from OpenAPI spec before scanning |
-| `--i-own-this` | off | Required to unlock active modules (`vhost`, `param`, `api`, `subdomain`) |
-| `--rate` | `15.0` | Requests per second (rate limit) |
-| `--param` | — | Parameter name to fuzz (required for legacy `param` module) |
-| `--param-url` | — | Full URL with query param to fuzz |
+| `--scope` | `scope/scope.yaml` | Authorization scope file (required) |
+| `--modules` | `dir` | Comma-separated: `dir` `vhost` `param` `api` `subdomain` `rules` |
+| `--i-own-this` | off | Unlocks active modules (`vhost`, `param`, `api`, `subdomain`, `rules`) |
+| `--rate` | `15.0` | Max requests per second |
+| `--wordlist` | `wordlists/common.txt` | Wordlist for directory enumeration |
+| `--templates` | — | Path to YAML rule file or directory (auto-enables `rules` module) |
+| `--spec-file` | — | Local `openapi.json` / `.yaml` for grey-box API scanning |
+| `--auto-discover` | off | Auto-fetch API routes from target's OpenAPI spec before scanning |
+| `--param` | — | Parameter name to fuzz. **Optional** — if omitted, Argus auto-discovers params from the target HTML (forms + query links) |
+| `--param-url` | TARGET | Full URL to fuzz. **Optional** — can embed params directly in TARGET e.g. `"http://host/search?q=x"` |
 | `--root-host` | — | Domain for vhost candidate generation |
 
 ---
 
-## 6. AI-Assisted Triage (FR-8.1)
-
-Generates code-level remediation suggestions for confirmed findings using **Google Gemini** (or OpenAI / offline fallback).
+### `discover` — save discovered API routes to a wordlist
 
 ```bash
-# Configure Gemini API Key (Optional)
-export GEMINI_API_KEY="your-gemini-api-key"   # Or GOOGLE_API_KEY
-
-# Run AI triage across confirmed findings
-python cli/argus_cli.py triage --scan <scan_id_prefix>
-# (Omit --scan to triage all confirmed findings across every scan)
+python cli/argus_cli.py discover http://127.0.0.1:8080 \
+    --scope scope/scope.yaml \
+    --output wordlists/mytarget.txt
 ```
-
-*Note: If no API key is present or network times out (>10s), Argus automatically uses built-in offline remediation guidance.*
 
 ---
 
-## 7. Web Dashboard UI (FR-10)
+### `triage` — generate AI fix suggestions
 
-Launch the central web UI to inspect scan findings, severity metrics (Iris gauge), HTTP request/response evidence, and AI remediation recommendations:
+Uses Google Gemini (or OpenAI), with a rule-based offline fallback if no key is set.
+
+```bash
+# Set your API key (optional — offline fallback works without it)
+export GEMINI_API_KEY="your-key"      # or GOOGLE_API_KEY
+export OPENAI_API_KEY="your-key"
+
+# Triage confirmed findings from a specific scan
+python cli/argus_cli.py triage --scan <scan-id-prefix>
+
+# Triage all confirmed findings across all scans
+python cli/argus_cli.py triage
+```
+
+---
+
+### `report` — export HTML or PDF vulnerability report (FR-11)
+
+Reads directly from the SQLite database — **no dashboard required**.
+
+```bash
+# List scans to get the ID prefix
+python cli/argus_cli.py scans
+
+# HTML report (dark-mode, self-contained, opens in any browser)
+python cli/argus_cli.py report --scan <prefix> --format html --output report.html
+
+# PDF report (A4, Windows-native via xhtml2pdf)
+python cli/argus_cli.py report --scan <prefix> --format pdf --output report.pdf
+
+# Aggregate report across ALL scans
+python cli/argus_cli.py report --format pdf --output full_audit.pdf
+```
+
+---
+
+### `findings` / `scans` — inspect the database
+
+```bash
+# List findings sorted by severity
+python cli/argus_cli.py findings
+
+# Filter by scan and minimum severity score
+python cli/argus_cli.py findings --scan <prefix> --min-severity 6.0
+
+# List all recorded scans
+python cli/argus_cli.py scans
+```
+
+---
+
+## Custom YAML Rule Templates (FR-6)
+
+Define your own HTTP request patterns and response matchers — similar to Nuclei templates.
+
+```yaml
+# templates/my_rule.yaml
+id: my-custom-check
+name: Exposed Admin Panel
+description: Checks if /admin returns 200 without authentication
+severity: misconfig        # RCE | SQLi | XSS | exposed_file | misconfig
+confidence: suspected      # confirmed | suspected
+
+request:
+  method: GET
+  path: /admin
+  headers: {}
+  body: null
+  params: {}
+
+matchers:
+  - type: status
+    values: [200]
+  - type: word
+    values: ["dashboard", "admin panel", "logout"]
+
+matcher_condition: and     # and = ALL must pass | or = ANY is enough (default)
+```
+
+**Matcher types:** `status` · `word` · `regex` · `size_gt` · `size_lt` · `header`
+
+Three ready-to-use templates ship in `templates/`:
+
+| Template | Detects |
+|---|---|
+| `exposed_env.yaml` | Publicly readable `.env` file with credentials |
+| `debug_endpoint.yaml` | Spring Actuator, Flask debugtoolbar, Django debug panel |
+| `sql_error.yaml` | Error-based SQLi — 20+ DB error signatures (MySQL, Postgres, SQLite, MSSQL, Oracle) |
+
+---
+
+## Web Dashboard
 
 ```bash
 python dashboard/app.py
-# Open http://127.0.0.1:5000 in your browser
+# Open http://127.0.0.1:5050
 ```
+
+Features: severity iris gauge · findings table with evidence · status management (open / fixed / false positive) · AI fix suggestion cards · scan selector.
 
 ---
 
 ## Project Structure
 
 ```
-core/auth_gate.py       Authorization gate: scope.yaml validation, --i-own-this, rate limiter (FR-0)
-core/dir_enum.py        Directory & file enumeration + false-positive baseline filter (FR-1)
-core/vhost.py           Virtual host discovery via Host header fuzzing (FR-2)
-core/api_discovery.py   4-Phase API spec parser, JS scraper, and endpoint extractor (FR-3)
-core/param_fuzz.py      Schema-aware API & parameter vulnerability fuzzing (FR-4)
-core/subdomain.py       Subdomain enumeration: crt.sh, AXFR, DNS brute-force & feedback (FR-5)
-core/ai_triage.py       Google Gemini LLM fix suggestion engine & offline fallback (FR-8.1)
-core/db.py              SQLite central findings store & CVSS-inspired scoring (FR-9/10)
-cli/argus_cli.py        CLI entry point: scan, discover, triage, findings, scans (FR-7.1)
-dashboard/              Flask web dashboard UI (FR-10)
-scope/scope.yaml        Authorized targets allowlist file
-wordlists/              Wordlists for directory and API enumeration
-test_target.py          Local Flask app for testing without Docker
-IMPLEMENTATION_STATUS.md Audit breakdown of implemented vs. roadmap features
+argus/
+├── cli/
+│   └── argus_cli.py          CLI: scan, discover, triage, report, findings, scans
+├── core/
+│   ├── auth_gate.py          FR-0  Scope enforcement, --i-own-this gate, rate limiter
+│   ├── dir_enum.py           FR-1  Async directory/file enumeration + false-positive filter
+│   ├── vhost.py              FR-2  Virtual host discovery via Host header fuzzing
+│   ├── api_discovery.py      FR-3  4-phase API discovery (spec, JS, OPTIONS, wordlist)
+│   ├── param_fuzz.py         FR-4  Schema-aware fuzzing (SQLi, XSS, IDOR, mass assign…)
+│   ├── subdomain.py          FR-5  crt.sh CT + AXFR + DNS brute-force + liveness check
+│   ├── custom_rules.py       FR-6  Nuclei-style YAML rule template engine
+│   ├── ai_triage.py          FR-8.1 Gemini/OpenAI fix suggestions + offline fallback
+│   ├── db.py                 FR-9/10 SQLite store, CVSS-inspired scoring
+│   └── report_gen.py         FR-11 HTML & PDF report exporter (xhtml2pdf)
+├── dashboard/
+│   ├── app.py                FR-7.4 Flask web dashboard
+│   ├── static/style.css
+│   └── templates/
+├── templates/                FR-6  Bundled YAML rule templates
+│   ├── exposed_env.yaml
+│   ├── debug_endpoint.yaml
+│   └── sql_error.yaml
+├── scope/
+│   └── scope.example.yaml    Copy → scope.yaml and fill in your targets
+├── wordlists/
+│   └── common.txt            Default directory enumeration wordlist
+├── test_target.py            Local Flask target for testing
+├── requirements.txt          All pinned dependencies
+├── .gitignore
+└── IMPLEMENTATION_STATUS.md  Detailed FR-by-FR progress tracker
 ```
 
 ---
 
-## Roadmap & Upcoming Features
+## Severity Scoring
 
-- **FR-6**: Custom YAML test template executor (Nuclei-style matcher engine).
-- **FR-11**: HTML & PDF report exporter (`core/report_gen.py`).
-- **FR-7.2**: VS Code Extension (In-editor inline diagnostics & fix suggestions).
-- **FR-7.3**: Chrome Browser Extension (Client-side request interception & live alerts).
+Scores are computed as `base_severity × confidence_multiplier` (CVSS-inspired):
+
+| Vuln Type | Base Score | Confirmed | Suspected |
+|---|---|---|---|
+| RCE | 9.0 | **9.0** | 4.5 |
+| SQLi | 8.5 | **8.5** | 4.25 |
+| XSS | 6.0 | **6.0** | 3.0 |
+| exposed_file | 5.0 | **5.0** | 2.5 |
+| misconfig | 4.0 | **4.0** | 2.0 |
+
+---
+
+## Typical Demo Workflow
+
+```bash
+# 1. Run a full scan
+python cli/argus_cli.py scan http://127.0.0.1:8080 \
+    --scope scope/scope.yaml \
+    --modules dir,api,subdomain \
+    --templates templates/ \
+    --i-own-this
+
+# 2. Generate AI fix suggestions
+python cli/argus_cli.py triage --scan <prefix>
+
+# 3. Export PDF report
+python cli/argus_cli.py report --scan <prefix> --format pdf --output demo_report.pdf
+
+# 4. Open the dashboard
+python dashboard/app.py   # → http://127.0.0.1:5050
+```
+
+---
+
+## Roadmap
+
+- **FR-7.2** VS Code Extension — inline diagnostics and AI fix suggestions in the editor
+- **FR-7.3** Chrome Browser Extension — live request interception and response flagging during manual browsing
+- **FR-8.2** ML-based finding prioritizer (scikit-learn classifier on suspected findings)
+
+See [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) for the full FR-by-FR breakdown.

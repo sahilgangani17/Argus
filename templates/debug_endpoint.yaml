@@ -1,0 +1,64 @@
+# Argus Custom Rule Template — Exposed Debug / Status Endpoints
+#
+# Many frameworks expose debug and health-check endpoints in development that
+# are accidentally left enabled in production:
+#   Flask-DebugToolbar  → /_debug_toolbar/
+#   Django Debug Panel  → /__debug__/
+#   Spring Boot Actuator→ /actuator, /actuator/env, /actuator/mappings
+#   Express status      → /status, /healthz, /metrics
+#   Laravel Telescope   → /telescope/api/requests
+#
+# These endpoints can leak: environment variables, route tables, query logs,
+# memory dumps, stack traces, and internal service topology.
+#
+# Severity: misconfig (base score 4.0)
+# Confidence: suspected — we detect the endpoint exists and returns 200,
+#             but cannot always confirm the content is actually sensitive
+#             without deeper inspection.
+
+id: argus-debug-endpoint
+name: Exposed Debug or Status Endpoint
+description: >
+  A debug, health-check, or metrics endpoint is publicly reachable. These
+  endpoints often expose sensitive internal state (environment variables,
+  route maps, heap dumps, request logs). Restrict access to localhost or
+  authenticated internal networks in production.
+severity: misconfig
+confidence: suspected
+
+request:
+  method: GET
+  # Uses the first path only; the CLI runs this template once per target.
+  # To check multiple debug paths, duplicate this file with different paths
+  # or use a directory of templates — one per path.
+  path: /actuator/env
+  headers:
+    Accept: "application/json, text/plain, */*"
+  body: null
+  params: {}
+
+matchers:
+  - type: status
+    values: [200]
+  - type: word
+    # Keywords indicative of framework debug output
+    values:
+      - "activeProfiles"       # Spring Boot Actuator /actuator/env
+      - "propertySources"      # Spring Boot Actuator /actuator/env
+      - "systemEnvironment"    # Spring Boot Actuator
+      - "classpath"            # Spring Boot Actuator
+      - "DATABASE_URL"         # generic env dump
+      - "debugtoolbar"         # Flask-DebugToolbar
+      - "__debug__"            # Django Debug Panel
+      - "telescope"            # Laravel Telescope
+      - "metrics"              # Prometheus / custom metrics
+      - "heap_used"            # Node.js process metrics
+  - type: header
+    header: content-type
+    values:
+      - "application/json"
+      - "application/vnd.spring-boot"
+
+# ANY matcher is sufficient — if the server returns 200 AND has any of these
+# words, it's worth flagging.
+matcher_condition: or

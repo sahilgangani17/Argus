@@ -1,0 +1,73 @@
+# Argus Custom Rule Template — SQL Error Injection (Error-Based Detection)
+#
+# Sends a minimal SQL injection probe (a single apostrophe appended to a
+# common parameter) and checks the response body for known database error
+# message signatures. This is the same technique used by sqlmap's --level=1
+# error-based detection and is very low-noise.
+#
+# Unlike the built-in param_fuzz module (which fuzzes discovered parameters),
+# this template targets a fixed path + parameter combination that the user
+# specifies. It is useful when you know a specific form/endpoint to test and
+# want a quick, explicit check without running a full API discovery pass.
+#
+# Severity: SQLi (base score 8.5)
+# Confidence: confirmed — error-string matches are strong indicators
+#             (syntax errors can only appear if the input reached the DB layer)
+#
+# CUSTOMISE THIS TEMPLATE:
+#   Change `path` and `params` to point at the endpoint you want to test.
+#   The default tests GET /?id=' which is a common pattern in vulnerable demos.
+
+id: argus-sql-error-basic
+name: SQL Injection — Error-Based (GET Parameter)
+description: >
+  A SQL syntax error message was returned by the server after injecting a
+  single apostrophe into a query parameter. This indicates the input is
+  passed to a database query without proper parameterisation, making the
+  endpoint vulnerable to SQL injection. Use parameterised queries / prepared
+  statements to remediate.
+severity: SQLi
+confidence: confirmed
+
+request:
+  method: GET
+  path: /
+  headers:
+    User-Agent: "Mozilla/5.0 (compatible; Argus Security Scanner)"
+  body: null
+  params:
+    id: "'"          # single apostrophe probe
+
+matchers:
+  - type: word
+    # Error strings emitted by common DB drivers / ORMs when SQL is broken
+    values:
+      # MySQL / MariaDB
+      - "you have an error in your sql syntax"
+      - "warning: mysql"
+      - "mysql_fetch_array"
+      - "unclosed quotation mark"
+      # PostgreSQL
+      - "pg_query()"
+      - "pg_exec()"
+      - "postgresql"
+      - "unterminated quoted string"
+      # SQLite
+      - "sqlite3.operationalerror"
+      - "sqlite_error"
+      # Microsoft SQL Server
+      - "microsoft sql server"
+      - "odbc sql server driver"
+      - "sql server native client"
+      # Oracle
+      - "ora-00907"
+      - "ora-00942"
+      - "oracle error"
+      # Generic ORM / framework errors
+      - "sqlexception"
+      - "syntaxerror"
+      - "sql syntax"
+      - "invalid query"
+
+# ANY single error string is enough to confirm the vulnerability
+matcher_condition: or

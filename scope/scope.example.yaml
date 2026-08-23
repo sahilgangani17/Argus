@@ -1,0 +1,19 @@
+# Argus — Scope File Template
+#
+# Copy this file to scope/scope.yaml and fill in your authorized targets.
+# scope/scope.yaml is gitignored — never commit real authorized targets.
+#
+# Format:
+#   authorized_targets: list of hostnames, wildcard patterns, or CIDR ranges
+#   owner:  your name / team (for audit trail)
+#   signed: true (placeholder for future cryptographic signing)
+
+authorized_targets:
+  - 127.0.0.1          # local test server
+  - localhost
+  # - example.com       # exact hostname
+  # - "*.example.com"   # all subdomains of example.com
+  # - 10.0.0.0/24       # entire CIDR range
+
+owner: "Your Name / Team"
+signed: true

@@ -673,22 +673,46 @@ async def _test_mass_assignment(
     # If the poisoned request succeeds (2xx) and baseline also succeeds,
     # check if the response body reflects any of the injected admin fields
     if poisoned_resp.status_code in range(200, 300):
-        resp_lower = poisoned_resp.text.lower()
-        reflected_fields = []
-        for field_name in MASS_ASSIGNMENT_FIELDS:
-            if field_name in resp_lower:
-                reflected_fields.append(field_name)
+        reflected_fields: List[str] = []
 
-        if reflected_fields:
+        # Signal 1: field appears as a top-level key in the JSON response
+        # (much stronger than a substring match which hits help/error text)
+        try:
+            resp_json = poisoned_resp.json()
+            reflected_fields = [
+                field_name for field_name in MASS_ASSIGNMENT_FIELDS
+                if field_name in resp_json
+            ]
+        except (json.JSONDecodeError, ValueError):
+            pass  # Not JSON — fall back to body-size signal only
+
+        # Signal 2: body size changed meaningfully vs baseline
+        # (server processed the extra fields even if not reflecting them)
+        body_changed = False
+        if baseline_resp is not None:
+            body_changed = abs(len(poisoned_resp.content) - len(baseline_resp.content)) > 50
+
+        if reflected_fields or body_changed:
+            # Build evidence label
+            if reflected_fields:
+                evidence_detail = f"fields {reflected_fields} are top-level keys in JSON response"
+            else:
+                evidence_detail = (
+                    f"response body size changed by "
+                    f"{abs(len(poisoned_resp.content) - len(baseline_resp.content))} bytes "
+                    f"after injecting admin fields (server likely processed them)"
+                )
+
             findings.append(ParamFinding(
                 url=url, parameter=f"body.[injected]",
                 vuln_type="misconfig",
                 confidence="suspected",
                 payload=json.dumps({k: v for k, v in MASS_ASSIGNMENT_FIELDS.items()
-                                    if k in reflected_fields}),
+                                    if k in reflected_fields} if reflected_fields
+                                   else MASS_ASSIGNMENT_FIELDS),
                 encoding="raw",
-                evidence=(f"Mass assignment: injected fields {reflected_fields} "
-                          f"reflected in {poisoned_resp.status_code} response."),
+                evidence=(f"Mass assignment: {evidence_detail}. "
+                          f"Status: {poisoned_resp.status_code}."),
             ))
             db.add_finding(
                 scan_id=scan_id, target=url, module="param_fuzz",
@@ -696,11 +720,11 @@ async def _test_mass_assignment(
                 url=url, parameter="body.[mass_assignment]",
                 request_evidence=f"{method} {url}\nBody: {json.dumps(poisoned_body)[:300]}",
                 response_evidence=(f"Status {poisoned_resp.status_code}, "
-                                   f"reflected admin fields: {reflected_fields}"),
+                                   f"{evidence_detail}"),
                 description=(f"Possible mass assignment vulnerability. Extra admin fields "
-                             f"({', '.join(reflected_fields)}) were accepted and reflected "
-                             f"in the response, suggesting the server processes unintended "
-                             f"properties without field whitelisting."),
+                             f"({', '.join(reflected_fields) if reflected_fields else 'unknown'}) "
+                             f"appear to have been accepted by the server. "
+                             f"Check for missing field whitelisting / allowlist validation."),
                 source_surface="cli",
             )
 

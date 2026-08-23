@@ -9,12 +9,12 @@
 
 | Category | Total Requirements | Implemented | Pending | Completion Rate |
 |---|---|---|---|---|
-| **Core Fuzzing Engines** | 6 | 5 | 1 | **83%** |
+| **Core Fuzzing Engines** | 6 | 6 | 0 | **100%** |
 | **Authorization & Control** | 4 | 4 | 0 | **100%** |
 | **Delivery Surfaces & UI** | 4 | 2 | 2 | **50%** |
 | **AI & Scoring Engine** | 3 | 2 | 1 | **67%** |
-| **Reporting & Export** | 1 | 0 | 1 | **0%** |
-| **Overall Project** | **18** | **13** | **5** | **72%** |
+| **Reporting & Export** | 1 | 1 | 0 | **100%** |
+| **Overall Project** | **18** | **15** | **3** | **83%** |
 
 ---
 
@@ -74,8 +74,11 @@
 ---
 
 ### FR-6: Custom Test Cases (YAML Templates)
-- **[FR-6.1 - FR-6.2] YAML Template Runner**: ❌ **Pending** (`core/custom_rules.py`)
-  - Nuclei-style custom test case execution engine accepting YAML templates for user-defined HTTP request structures and matching criteria.
+- **[FR-6.1] YAML Template Runner**: ✅ **Implemented** ([core/custom_rules.py](file:///d:/Project/SIH/Argus/core/custom_rules.py))
+  - Loads Nuclei-style YAML templates from a file or directory. Supports 5 matcher types: `status`, `word`, `regex`, `size_gt/lt`, `header`. Combinable with `and`/`or` logic.
+- **[FR-6.2] Integrated Execution alongside Standard Modules**: ✅ **Implemented** ([cli/argus_cli.py](file:///d:/Project/SIH/Argus/cli/argus_cli.py))
+  - Use `--modules rules --templates <path>` or just `--templates <path>` (auto-enables the rules module). Three ready-to-use example templates ship in `templates/`.
+  - Example templates: `templates/exposed_env.yaml`, `templates/debug_endpoint.yaml`, `templates/sql_error.yaml`.
 
 ---
 
@@ -102,17 +105,17 @@
 ---
 
 ### FR-11: Reporting Engine
-- **[FR-11.1] HTML & PDF Report Export**: ❌ **Pending** (`core/report_gen.py`)
-  - Export engine generating standalone HTML and PDF vulnerability reports complete with executive charts, evidence, and remediation steps.
+- **[FR-11.1] HTML & PDF Report Export**: ✅ **Implemented** ([core/report_gen.py](file:///d:/Project/SIH/Argus/core/report_gen.py))
+  - Standalone report engine rendering self-contained dark-mode HTML reports (Jinja2) and Windows-native PDF exports (`xhtml2pdf`). Includes executive summary cards, severity distribution charts, evidence pre blocks, and AI remediation guidance.
 
 ---
 
 ## 3. What Needs to Be Built Next (Roadmap)
 
 ```
-[Phase 1 - Complete]             [Phase 2 - Current Next Step]    [Phase 3 - Multi-Surface Expansion]
+[Phase 1 - Complete]             [Phase 2 - Complete]             [Phase 3 - Multi-Surface Expansion]
    Auth Gate (FR-0)                 Custom YAML Templates (FR-6)     VS Code Extension (FR-7.2)
-   Directory Enum (FR-1)            HTML/PDF Report Exporter         Browser Extension (FR-7.3)
+   Directory Enum (FR-1)            HTML/PDF Report Exporter (FR-11) Browser Extension (FR-7.3)
    VHost Discovery (FR-2)                                            ML Prioritizer (FR-8.2)
    API Fuzzing (FR-3 & FR-4)
    Subdomain Enumeration (FR-5)
@@ -121,6 +124,5 @@
 ```
 
 ### Next Implementation Priorities:
-1. **Module FR-6**: Implement `core/custom_rules.py` (YAML test template executor).
-2. **Module FR-11**: Implement `core/report_gen.py` (HTML & PDF scan report generation).
-3. **Surfaces**: Implement VS Code and Chrome Browser extensions.
+1. **Surfaces**: Implement VS Code Extension (`vscode-extension/`) and Chrome Browser Extension (`browser-extension/`).
+2. **ML Prioritizer**: Implement `scikit-learn` finding prioritizer (FR-8.2).

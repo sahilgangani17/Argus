@@ -575,13 +575,36 @@ async def _brute_force_api_paths(
     concurrency: int = 15,
 ) -> Set[str]:
     """
-    Hit common API path conventions and keep anything that doesn't 404.
-    This is the last-resort discovery when specs are blocked and JS
-    scraping yields nothing.
+    Hit common API path conventions and keep anything that doesn't look like
+    a generic "not found" response.  Uses baseline-diffing to filter custom
+    404-handlers that return 200 for every path.
+
+    Strategy:
+      1. Probe a guaranteed-nonexistent canary path to capture the server's
+         "unknown path" fingerprint (status + body size).
+      2. Only report a path as *found* if its status or body differs
+         meaningfully (>50 bytes) from that canary baseline.
     """
     found: Set[str] = set()
     semaphore = asyncio.Semaphore(concurrency)
 
+    # ------------------------------------------------------------------
+    # Step 1 — establish canary baseline
+    # ------------------------------------------------------------------
+    canary_path = "__argus_canary_nonexistent_xzq__"
+    canary_url = f"{base_url.rstrip('/')}/{canary_path}"
+    await ctx.throttle()
+    try:
+        canary_resp = await client.get(canary_url, timeout=5.0, follow_redirects=False)
+        canary_status = canary_resp.status_code
+        canary_len = len(canary_resp.content)
+    except httpx.RequestError:
+        # If we can't reach the server at all, bail out early
+        return found
+
+    # ------------------------------------------------------------------
+    # Step 2 — probe each wordlist path and diff against baseline
+    # ------------------------------------------------------------------
     async def probe(path: str):
         async with semaphore:
             url = f"{base_url.rstrip('/')}/{path}"
@@ -591,8 +614,20 @@ async def _brute_force_api_paths(
                 if scan_id:
                     db.log_request(scan_id, base_url, "api_discovery", "GET",
                                    url, resp.status_code)
-                # Anything that isn't a hard 404 or generic error is interesting
-                if resp.status_code not in (404, 502, 503):
+
+                # Hard-skip known error codes regardless of baseline
+                if resp.status_code in (404, 502, 503):
+                    return
+
+                # Accept if the status code differs from the canary
+                if resp.status_code != canary_status:
+                    found.add(path)
+                    return
+
+                # Same status as canary — only accept if body is meaningfully
+                # larger (real endpoints usually return structured data)
+                resp_len = len(resp.content)
+                if abs(resp_len - canary_len) > 50:
                     found.add(path)
             except httpx.RequestError:
                 pass
