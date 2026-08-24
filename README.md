@@ -1,6 +1,6 @@
 # Argus — Comprehensive Web Application Security Scanner
 
-> **SIH1750** — An integrated web application security testing engine that automates discovery and vulnerability testing across directories, virtual hosts, API endpoints, parameters, and subdomains — with AI-assisted remediation and PDF/HTML reporting.
+> **SIH1750** — An integrated web application security testing engine that automates discovery and vulnerability testing across directories, virtual hosts, API endpoints, parameters, and subdomains — with an interactive Claude Code-style terminal UI, animated pixel-art scan agents, AI-assisted remediation, and PDF/HTML reporting.
 
 ---
 
@@ -8,20 +8,21 @@
 
 | Module | FR | Status |
 |---|---|---|
-| Authorization Gate (scope enforcement, rate limiting) | FR-0 | ✅ Done |
-| Directory & File Enumeration + false-positive filtering | FR-1 | ✅ Done |
-| Virtual Host Discovery (Host header fuzzing) | FR-2 | ✅ Done |
-| API Endpoint Discovery (4-phase: spec, JS scrape, OPTIONS, wordlist) | FR-3 | ✅ Done |
-| Schema-Aware Parameter Fuzzing (SQLi, XSS, IDOR, mass assignment…) | FR-4 | ✅ Done |
-| Subdomain Enumeration (crt.sh CT, AXFR, DNS brute-force) | FR-5 | ✅ Done |
-| Custom YAML Rule Templates (Nuclei-style engine) | FR-6 | ✅ Done |
-| CLI Scan Engine | FR-7.1 | ✅ Done |
-| Web Dashboard | FR-7.4 | ✅ Done |
-| AI Fix Suggestions (Gemini / OpenAI / offline fallback) | FR-8.1 | ✅ Done |
-| CVSS-inspired Severity Scoring + SQLite storage | FR-9/10 | ✅ Done |
-| HTML & PDF Report Exporter | FR-11 | ✅ Done |
-| VS Code Extension | FR-7.2 | 🔜 Roadmap |
-| Chrome Browser Extension | FR-7.3 | 🔜 Roadmap |
+| Authorization Gate (scope enforcement, rate limiting) | FR-0 | Done |
+| Directory & File Enumeration + false-positive filtering | FR-1 | Done |
+| Virtual Host Discovery (Host header fuzzing) | FR-2 | Done |
+| API Endpoint Discovery (4-phase: spec, JS scrape, OPTIONS, wordlist) | FR-3 | Done |
+| Schema-Aware Parameter Fuzzing (SQLi, XSS, IDOR, mass assignment) | FR-4 | Done |
+| Subdomain Enumeration (crt.sh CT, AXFR, DNS brute-force) | FR-5 | Done |
+| Custom YAML Rule Templates (Nuclei-style engine) | FR-6 | Done |
+| CLI Scan Engine (direct subcommands) | FR-7.1 | Done |
+| Interactive TUI (Claude Code-style wizard + pixel agents) | FR-7.1.1 | Done |
+| Web Dashboard | FR-7.4 | Done |
+| AI Fix Suggestions (Gemini / OpenAI / offline fallback) | FR-8.1 | Done |
+| CVSS-inspired Severity Scoring + SQLite storage | FR-9/10 | Done |
+| HTML & PDF Report Exporter | FR-11 | Done |
+| VS Code Extension | FR-7.2 | Roadmap |
+| Chrome Browser Extension | FR-7.3 | Roadmap |
 
 ---
 
@@ -31,6 +32,7 @@
 
 ```bash
 python -m venv venv
+
 # Windows
 venv\Scripts\activate
 # macOS / Linux
@@ -41,7 +43,8 @@ pip install -r requirements.txt
 
 ### 2. Configure your scope file
 
-Copy the example and edit it with your authorized target(s). **Never commit your real `scope.yaml`** — it is gitignored.
+Copy the example and edit it with your authorized target(s).
+**Never commit your real `scope.yaml`** — it is gitignored.
 
 ```bash
 cp scope/scope.example.yaml scope/scope.yaml
@@ -68,6 +71,37 @@ Or use DVWA via Docker:
 ```bash
 docker run -d -p 8080:80 vulnerables/web-dvwa
 ```
+
+---
+
+## Interactive TUI (Recommended)
+
+Run with no arguments to launch the **Claude Code-style interactive terminal UI**:
+
+```bash
+python cli/argus_cli.py
+# or explicitly:
+python cli/argus_cli.py interactive
+```
+
+The TUI provides:
+
+- **Persistent two-column header** — large ASCII ARGUS art on the left, contextual tips on the right, shown on every screen
+- **Arrow-key module selector** — Up/Down to navigate, Space to toggle `[✓]`, Tab to see a live description of the highlighted module, Enter to confirm, Esc to go back
+- **6-step scan wizard** — target → scope → modules → authorization → advanced options → report settings, with the right panel updating for each step
+- **Animated pixel-art scan agents** — each module runs with its own character animating at 4 FPS while the task executes:
+
+| Module | Agent | Animation |
+|---|---|---|
+| `dir` | Scout | Walks, crouches, peeks at paths |
+| `vhost` | Recon | Binoculars sweeping left/right |
+| `param` | Hacker | Typing at keyboard, injecting payloads |
+| `api` | API Bot | Points at schema, rotates chart |
+| `subdomain` | Spider | Climbs web, drops on DNS results |
+| `rules` | Ruler | Reads scroll, stamps MATCH |
+
+- **Arrow-key report selector** — navigate past scans with Up/Down, press Enter to export, `a` for all scans combined, Esc to return
+- **Auto-saved reports** — HTML, PDF, and JSON saved to your configured output folder after every scan
 
 ---
 
@@ -133,9 +167,18 @@ python cli/argus_cli.py scan target.com \
 | `--templates` | — | Path to YAML rule file or directory (auto-enables `rules` module) |
 | `--spec-file` | — | Local `openapi.json` / `.yaml` for grey-box API scanning |
 | `--auto-discover` | off | Auto-fetch API routes from target's OpenAPI spec before scanning |
-| `--param` | — | Parameter name to fuzz. **Optional** — if omitted, Argus auto-discovers params from the target HTML (forms + query links) |
-| `--param-url` | TARGET | Full URL to fuzz. **Optional** — can embed params directly in TARGET e.g. `"http://host/search?q=x"` |
+| `--param` | — | Parameter name to fuzz. Optional — if omitted, Argus auto-discovers params from the target HTML |
+| `--param-url` | TARGET | Full URL to fuzz. Optional — can embed params directly in TARGET |
 | `--root-host` | — | Domain for vhost candidate generation |
+
+---
+
+### `interactive` — launch the TUI wizard
+
+```bash
+python cli/argus_cli.py interactive
+# equivalent to running with no subcommand
+```
 
 ---
 
@@ -258,13 +301,15 @@ Features: severity iris gauge · findings table with evidence · status manageme
 ```
 argus/
 ├── cli/
-│   └── argus_cli.py          CLI: scan, discover, triage, report, findings, scans
+│   ├── argus_cli.py          CLI: scan, interactive, discover, triage, report, findings, scans
+│   ├── interactive_cli.py    Interactive TUI: Claude Code-style wizard, arrow-key selectors
+│   └── pixel_agents.py       Pixel-art ASCII agent sprites (Scout, Recon, Hacker, API Bot, Spider, Ruler)
 ├── core/
 │   ├── auth_gate.py          FR-0  Scope enforcement, --i-own-this gate, rate limiter
 │   ├── dir_enum.py           FR-1  Async directory/file enumeration + false-positive filter
 │   ├── vhost.py              FR-2  Virtual host discovery via Host header fuzzing
 │   ├── api_discovery.py      FR-3  4-phase API discovery (spec, JS, OPTIONS, wordlist)
-│   ├── param_fuzz.py         FR-4  Schema-aware fuzzing (SQLi, XSS, IDOR, mass assign…)
+│   ├── param_fuzz.py         FR-4  Schema-aware fuzzing (SQLi, XSS, IDOR, mass assign)
 │   ├── subdomain.py          FR-5  crt.sh CT + AXFR + DNS brute-force + liveness check
 │   ├── custom_rules.py       FR-6  Nuclei-style YAML rule template engine
 │   ├── ai_triage.py          FR-8.1 Gemini/OpenAI fix suggestions + offline fallback
@@ -307,6 +352,13 @@ Scores are computed as `base_severity × confidence_multiplier` (CVSS-inspired):
 ## Typical Demo Workflow
 
 ```bash
+# Option A — Interactive TUI (recommended)
+python cli/argus_cli.py
+# Follow the wizard: select modules with arrow keys + space,
+# watch pixel agents animate during each scan module,
+# reports auto-saved when done.
+
+# Option B — Direct CLI
 # 1. Run a full scan
 python cli/argus_cli.py scan http://127.0.0.1:8080 \
     --scope scope/scope.yaml \

@@ -12,8 +12,10 @@
 # HTTP client — async, used by all scan modules
 httpx==0.28.1
 
-# CLI framework — argus_cli.py
+# CLI framework & interactive TUI — argus_cli.py, interactive_cli.py
 click==8.4.2
+rich==15.0.0
+InquirerPy==0.3.4
 
 # Web dashboard — dashboard/app.py
 Flask==3.1.3

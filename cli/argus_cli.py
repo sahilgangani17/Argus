@@ -45,12 +45,21 @@ from core.param_fuzz import fuzz_parameter, fuzz_api_endpoints
 from core.api_discovery import discover_api_routes, discover_api_endpoints
 from core.subdomain import enumerate_subdomains, DEFAULT_SUBDOMAIN_WORDLIST
 from core.custom_rules import load_templates, run_all_templates
+from cli.interactive_cli import launch_interactive_cli
 
 
-@click.group()
-def cli():
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
     """Argus — comprehensive web application fuzzer (CLI engine)."""
-    pass
+    if ctx.invoked_subcommand is None:
+        launch_interactive_cli()
+
+
+@cli.command()
+def interactive():
+    """Launch the interactive Claude Code-style terminal UI wizard."""
+    launch_interactive_cli()
 
 
 @cli.command()

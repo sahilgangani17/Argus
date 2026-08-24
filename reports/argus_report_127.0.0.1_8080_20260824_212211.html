@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Argus Security Report — http://127.0.0.1:8080</title>
+<style>
+/* ── Reset & base ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:           #0B0E11;
+  --surface:      #12161C;
+  --border:       #232933;
+  --text:         #E7EAEE;
+  --muted:        #8993A3;
+  --amber:        #E8A33D;
+  --teal:         #3FA9A0;
+  --red:          #D0454F;
+  --orange:       #E0674F;
+  --blue:         #6B93B0;
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body:    'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Mono', monospace;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+html { background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 14px; line-height: 1.6; }
+body { max-width: 1100px; margin: 0 auto; padding: 48px 32px 80px; }
+
+a { color: var(--amber); text-decoration: none; }
+
+/* ── Cover page ────────────────────────────────────────────────────── */
+.cover {
+  min-height: 220px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 48px;
+  padding-bottom: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-eye { width: 28px; height: 28px; }
+
+.brand-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.brand-sub {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.cover-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+.cover-title span { color: var(--amber); }
+
+.cover-meta {
+  display: flex;
+  gap: 36px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cover-meta strong { color: var(--text); font-weight: 500; }
+
+/* ── Executive summary ─────────────────────────────────────────────── */
+.exec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 16px;
+  margin-bottom: 48px;
+}
+
+.exec-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 18px;
+}
+
+.exec-card .card-val {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 36px;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.exec-card .card-lbl {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.card-critical .card-val { color: var(--red); }
+.card-high     .card-val { color: var(--orange); }
+.card-medium   .card-val { color: var(--amber); }
+.card-low      .card-val { color: var(--blue); }
+.card-total    .card-val { color: var(--teal); }
+
+/* ── Severity bar chart ────────────────────────────────────────────── */
+.chart-section { margin-bottom: 48px; }
+
+.section-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 18px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bar-chart { display: flex; flex-direction: column; gap: 10px; }
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.bar-label { width: 100px; color: var(--text); text-align: right; flex-shrink: 0; }
+.bar-track { flex: 1; background: var(--border); border-radius: 4px; height: 10px; overflow: hidden; }
+.bar-fill  { height: 100%; border-radius: 4px; min-width: 4px; }
+.bar-count { width: 28px; color: var(--muted); text-align: right; flex-shrink: 0; }
+
+/* ── Finding cards ─────────────────────────────────────────────────── */
+.findings-section { margin-bottom: 48px; }
+
+.finding-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.finding-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sev-badge {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 16px;
+  border: 2px solid;
+  border-radius: 6px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.finding-meta { flex: 1; min-width: 0; }
+
+.finding-type {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.finding-url {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finding-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 100px;
+  letter-spacing: 0.04em;
+}
+
+.tag-confidence-confirmed { background: #3FA9A01A; color: var(--teal); border: 1px solid #3FA9A033; }
+.tag-confidence-suspected { background: #8993A31A; color: var(--muted); border: 1px solid #8993A333; }
+.tag-module  { background: #E8A33D11; color: var(--amber); border: 1px solid #E8A33D33; }
+.tag-status-open          { background: #D0454F11; color: var(--red);    border: 1px solid #D0454F33; }
+.tag-status-fixed         { background: #3FA9A011; color: var(--teal);   border: 1px solid #3FA9A033; }
+.tag-status-false_positive{ background: #8993A311; color: var(--muted);  border: 1px solid #8993A333; }
+
+.finding-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+
+.finding-desc {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.65;
+}
+
+.evidence-block { display: flex; flex-direction: column; gap: 6px; }
+
+.evidence-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.evidence-pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.fix-block {
+  border-left: 3px solid var(--amber);
+  padding: 12px 14px;
+  background: #E8A33D08;
+  border-radius: 0 6px 6px 0;
+}
+
+.fix-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--amber);
+  margin-bottom: 8px;
+}
+
+.fix-text {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.65;
+  white-space: pre-line;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+.report-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── Print styles ────────────────────────────────────────────────────── */
+@media print {
+  body { background: white; color: #111; padding: 0; }
+  :root {
+    --bg: #ffffff; --surface: #f5f5f5; --border: #e0e0e0;
+    --text: #111111; --muted: #666666;
+  }
+  .finding-card { break-inside: avoid; }
+  .evidence-pre { max-height: none; overflow: visible; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Cover ──────────────────────────────────────────────────────────── -->
+<div class="cover">
+  <div class="brand">
+    <svg class="brand-eye" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="16" cy="16" rx="14" ry="8" stroke="#E8A33D" stroke-width="1.6"/>
+      <circle cx="16" cy="16" r="4.5" fill="#E8A33D"/>
+    </svg>
+    <span class="brand-name">ARGUS</span>
+    <span class="brand-sub">security scanner</span>
+  </div>
+
+  <h1 class="cover-title">
+    Vulnerability Report<br>
+    <span>http://127.0.0.1:8080</span>
+  </h1>
+
+  <div class="cover-meta">
+    <div><strong>Scan ID</strong>&nbsp;&nbsp;40319f32-2de1-43d5-a724-4b0943ce0e9c</div>
+    <div><strong>Status</strong>&nbsp;&nbsp;completed</div>
+    <div><strong>Started</strong>&nbsp;&nbsp;2026-08-24 21:21:47</div>
+    <div><strong>Finished</strong>&nbsp;&nbsp;2026-08-24 21:22:11</div>
+    <div><strong>Generated</strong>&nbsp;&nbsp;2026-08-24 21:22:11</div>
+    <div><strong>Scope file</strong>&nbsp;&nbsp;scope/scope.yaml</div>
+  </div>
+</div>
+
+<!-- ── Executive summary ───────────────────────────────────────────────── -->
+<section>
+  <h2 class="section-title">Executive Summary</h2>
+  <div class="exec-grid">
+    <div class="exec-card card-total">
+      <div class="card-val">0</div>
+      <div class="card-lbl">Total Findings</div>
+    </div>
+    <div class="exec-card card-critical">
+      <div class="card-val">0</div>
+      <div class="card-lbl">Critical ≥ 8.0</div>
+    </div>
+    <div class="exec-card card-high">
+      <div class="card-val">0</div>
+      <div class="card-lbl">High 6.0–7.9</div>
+    </div>
+    <div class="exec-card card-medium">
+      <div class="card-val">0</div>
+      <div class="card-lbl">Medium 4.0–5.9</div>
+    </div>
+    <div class="exec-card card-low">
+      <div class="card-val">0</div>
+      <div class="card-lbl">Low &lt; 4.0</div>
+    </div>
+    <div class="exec-card">
+      <div class="card-val" style="color: var(--teal)">0</div>
+      <div class="card-lbl">Confirmed</div>
+    </div>
+    <div class="exec-card">
+      <div class="card-val" style="color: var(--muted)">0</div>
+      <div class="card-lbl">Suspected</div>
+    </div>
+    <div class="exec-card">
+      <div class="card-val" style="color: var(--teal)">0</div>
+      <div class="card-lbl">Fixed</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Severity distribution bar chart ─────────────────────────────────── -->
+<section class="chart-section">
+  <h2 class="section-title">Severity Distribution by Type</h2>
+  <div class="bar-chart">
+    
+    <div class="bar-row">
+      <span class="bar-label">RCE</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:0.0%; background:#D0454F"></div>
+      </div>
+      <span class="bar-count">0</span>
+    </div>
+    
+    <div class="bar-row">
+      <span class="bar-label">SQLi</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:0.0%; background:#E0674F"></div>
+      </div>
+      <span class="bar-count">0</span>
+    </div>
+    
+    <div class="bar-row">
+      <span class="bar-label">XSS</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:0.0%; background:#E8A33D"></div>
+      </div>
+      <span class="bar-count">0</span>
+    </div>
+    
+    <div class="bar-row">
+      <span class="bar-label">exposed_file</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:0.0%; background:#D4B14A"></div>
+      </div>
+      <span class="bar-count">0</span>
+    </div>
+    
+    <div class="bar-row">
+      <span class="bar-label">misconfig</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:0.0%; background:#6B93B0"></div>
+      </div>
+      <span class="bar-count">0</span>
+    </div>
+    
+  </div>
+</section>
+
+<!-- ── Findings ─────────────────────────────────────────────────────────── -->
+<section class="findings-section">
+  <h2 class="section-title">Findings (0, sorted by severity)</h2>
+
+  
+  <p style="color:var(--muted); font-family:var(--font-mono); font-size:13px;">No findings recorded for this scan.</p>
+  
+
+  
+</section>
+
+<!-- ── Footer ─────────────────────────────────────────────────────────── -->
+<footer class="report-footer">
+  <span>Generated by Argus Security Scanner — 2026-08-24 21:22:11</span>
+  <span>Target: http://127.0.0.1:8080 &nbsp;|&nbsp; 0 finding(s)</span>
+</footer>
+
+</body>
+</html>
